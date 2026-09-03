@@ -89,7 +89,7 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
     private let modeCombo = NSPopUpButton()
 
     // ---- band strip
-    private let wpmField = NSTextField(string: "25")
+    private let wpmField = NoCandidateTextField(string: "25")
     private let wpmStepper: NSStepper = {
         let s = NSStepper()
         s.minValue = 10
@@ -271,7 +271,7 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
         // uppercase as-you-type for call / exchange fields
 
         let inputFormatter = CallInputFormatter()
-        for field in [callEntry, exch1Entry, exch2Entry] {
+        for field in [callField, exchangeField, wpmField, callEntry, exch1Entry, exch2Entry] {
             field.formatter = inputFormatter
             field.isAutomaticTextCompletionEnabled = false
         }
@@ -1100,16 +1100,25 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
 // MARK: - NSTouchBarDelegate
 
 extension MainWindowController: NSTouchBarDelegate {
-
+    
     public override func makeTouchBar() -> NSTouchBar? {
         let touchBar = NSTouchBar()
         touchBar.delegate = self
+        touchBar.customizationIdentifier = NSTouchBar.CustomizationIdentifier("com.yourcompany.app.mainWindowTouchBar")
         touchBar.defaultItemIdentifiers = [
             .runStop, .sendCQ, .sendHisNR, .sendTU, .MyCall, .HisCall, .qm
         ]
         return touchBar
     }
-
+    
+     // If the Touch Bar is cleared by the system after switching tabs, you can re-trigger the setting in the NSTextFieldDelegate callback
+    public func controlTextDidBeginEditing(_ obj: Notification) {
+        if #available(macOS 10.12.2, *) {
+            // Make sure the Touch Bar of the current window responder is pointing to the main Touch Bar
+            self.window?.touchBar = self.touchBar
+        }
+    }
+    
     public func touchBar(_ touchBar: NSTouchBar, makeItemForIdentifier identifier: NSTouchBarItem.Identifier) -> NSTouchBarItem? {
         let item = NSCustomTouchBarItem(identifier: identifier)
 
