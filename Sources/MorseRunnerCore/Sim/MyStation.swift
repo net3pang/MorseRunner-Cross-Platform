@@ -140,7 +140,7 @@ public final class MyStation: Station {
     /// Try to change the callsign currently being sent (Delphi
     /// `UpdateCallInMessage`).
     @discardableResult
-    func updateCallInMessage(_ aCall: String) -> Bool {
+    public func updateCallInMessage(_ aCall: String) -> Bool {
         guard !aCall.isEmpty else { return false }
         var result = false
 

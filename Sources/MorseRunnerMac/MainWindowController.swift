@@ -316,6 +316,18 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
         callEntry.action = #selector(callEntryEntered)
         callEntry.cell?.sendsActionOnEndEditing = false
 
+        // Keep the engine's callsign mirror in sync while the operator types.
+        // This is also what enables UpdateCallInMessage to replace trailing
+        // letters that have not reached the transmitter yet.
+        NotificationCenter.default.addObserver(
+            forName: NSControl.textDidChangeNotification, object: callEntry, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.sim.enteredCall = self.callEntry.stringValue.uppercased()
+            }
+        }
+
         exch1Entry.placeholderString = "Exch1"
         exch1Entry.target = self
         exch1Entry.action = #selector(exch1Entered)
