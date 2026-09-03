@@ -347,6 +347,8 @@ public final class Log {
         }
         let mul = rawMultList.count
         SimEngine.shared.uiHooks.onStatsUpdate?(ScoreSummary(
+            qsoCount: qsoList.count,
+            verifiedQsoCount: qsoList.filter { $0.err == "   " }.count,
             points: rawPoints, mults: mul,
             verifiedPoints: verifiedPoints, verifiedMults: verifiedMultList.count))
     }
@@ -362,6 +364,8 @@ public final class Log {
             }
         }
         SimEngine.shared.uiHooks.onStatsUpdate?(ScoreSummary(
+            qsoCount: qsoList.count,
+            verifiedQsoCount: qsoList.filter { $0.err == "   " }.count,
             points: rawScore, mults: 0, verifiedPoints: score, verifiedMults: 0))
         SimEngine.shared.uiHooks.onHstScore?(score)
     }
