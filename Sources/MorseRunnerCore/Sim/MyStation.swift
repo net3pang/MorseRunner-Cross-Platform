@@ -140,7 +140,7 @@ public final class MyStation: Station {
     /// Try to change the callsign currently being sent (Delphi
     /// `UpdateCallInMessage`).
     @discardableResult
-    func updateCallInMessage(_ aCall: String) -> Bool {
+    public func updateCallInMessage(_ aCall: String) -> Bool {
         guard !aCall.isEmpty else { return false }
         var result = false
 
@@ -158,14 +158,19 @@ public final class MyStation: Station {
             }
 
             // compare with the old one
-            result = newEnvelope.count >= sendPos
-            if result {
+            // The current envelope may have drained between the text-change
+            // notification and this callback.  Do not subscript a missing or
+            // shorter envelope while checking the already-sent prefix.
+            if let currentEnvelope = envelope, sendPos <= currentEnvelope.count,
+               newEnvelope.count >= sendPos {
                 for i in 0..<sendPos {
-                    if envelope?[i] != newEnvelope[i] {
+                    if currentEnvelope[i] != newEnvelope[i] {
                         result = false
                         break
                     }
                 }
+            } else {
+                result = false
             }
 
             if result {
@@ -176,7 +181,9 @@ public final class MyStation: Station {
 
         // could not correct the current message, but another call is scheduled
         if !result {
-            for i in 1..<pieces.count where pieces[i] == "@" {
+            // `1..<0` is an invalid Swift range and traps.  `dropFirst()`
+            // safely produces an empty collection when no suffix is queued.
+            for i in pieces.indices.dropFirst() where pieces[i] == "@" {
                 hisCall = aCall
                 return true
             }

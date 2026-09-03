@@ -13,7 +13,18 @@ public final class SimController: @unchecked Sendable {
     /// Sent exchange field (MainForm.ExchangeEdit).
     public private(set) var exchangeEdit = ""
     /// Entry fields (MainForm.Edit1/2/3).
-    public var enteredCall = "" { didSet { SimEngine.shared.uiHooks.enteredCall = enteredCall } }
+    public var enteredCall = "" {
+        didSet {
+            SimEngine.shared.uiHooks.enteredCall = enteredCall
+
+            // The original runner lets the operator correct a callsign while
+            // it is being keyed.  MyStation compares the already transmitted
+            // samples and replaces only the not-yet-sent suffix (or updates a
+            // later queued <his> token).  Calling this on every edit keeps the
+            // UI responsive without changing the Enter/QSO state machine.
+            Contest.shared?.me.updateCallInMessage(enteredCall)
+        }
+    }
     public var enteredExch1 = "" { didSet { SimEngine.shared.uiHooks.enteredExch1 = enteredExch1 } }
     public var enteredExch2 = "" { didSet { SimEngine.shared.uiHooks.enteredExch2 = enteredExch2 } }
 

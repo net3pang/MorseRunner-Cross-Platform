@@ -14,6 +14,10 @@ public struct ScoreTableRow {
 
 /// Score summary (port of Log.UpdateStats).
 public struct ScoreSummary {
+    /// Number of QSOs currently in the log (including those with errors).
+    public let qsoCount: Int
+    /// Number of QSOs that have been verified as error-free.
+    public let verifiedQsoCount: Int
     public let points: Int
     public let mults: Int
     public let verifiedPoints: Int

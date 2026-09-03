@@ -205,6 +205,40 @@ final class MorseRunnerCoreTests: XCTestCase {
         XCTAssertEqual(failures, 0, "\(failures) test(s) failed")
     }
 
+    /// Editing the call after Enter must update the portion that has not yet
+    /// been transmitted, while preserving the already-sent prefix.
+    func testCallsignCanBeCorrectedWhileSending() {
+        Settings.simContest = .wpx
+        Settings.runMode = .pileup
+        let contest = CqWpx()
+        Contest.shared = contest
+        contest.initContest()
+        contest.me.myCall = "VE3NEA"
+        _ = contest.onSetMyCall("VE3NEA")
+
+        let sim = SimController.shared
+        sim.enteredCall = "K1ABC"
+        sim.sendMsg(.hisCall)
+        XCTAssertEqual(contest.me.hisCall, "K1ABC")
+
+        // Let the first audio block leave the station, then correct only the
+        // suffix.  The shared prefix remains identical, so the in-flight
+        // envelope can be replaced safely.
+        _ = contest.me.getBlock()
+        sim.enteredCall = "K1ABD"
+        XCTAssertEqual(contest.me.hisCall, "K1ABD")
+        sim.wipeBoxes()
+    }
+
+    /// Updating the entry field before any transmission is queued must be a
+    /// no-op.  This is the normal path while typing the first callsign
+    /// character after starting a run.
+    func testCallsignEditBeforeTransmissionDoesNotTrap() {
+        let station = MyStation()
+        XCTAssertFalse(station.updateCallInMessage("K"))
+        XCTAssertEqual(station.hisCall, "")
+    }
+
     /// Keyer: character spacing inside a single callsign must be the
     /// standard 1U intra-character / 3U inter-character (Delphi comment:
     /// "' ': AddOff(2,0) // 3U inter-char spacing (2U + prior 1U)").

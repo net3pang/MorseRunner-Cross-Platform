@@ -125,9 +125,11 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
     // ---- score
     private let logTable = NSTableView()
     private let logScroll = NSScrollView()
+    private let rawQsoLabel = NSTextField(labelWithString: "")
     private let rawPtsLabel = NSTextField(labelWithString: "")
     private let rawMultLabel = NSTextField(labelWithString: "")
     private let rawScoreLabel = NSTextField(labelWithString: "")
+    private let verQsoLabel = NSTextField(labelWithString: "")
     private let verPtsLabel = NSTextField(labelWithString: "")
     private let verMultLabel = NSTextField(labelWithString: "")
     private let verScoreLabel = NSTextField(labelWithString: "")
@@ -316,6 +318,18 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
         callEntry.action = #selector(callEntryEntered)
         callEntry.cell?.sendsActionOnEndEditing = false
 
+        // Keep the engine's callsign mirror in sync while the operator types.
+        // This is also what enables UpdateCallInMessage to replace trailing
+        // letters that have not reached the transmitter yet.
+        NotificationCenter.default.addObserver(
+            forName: NSControl.textDidChangeNotification, object: callEntry, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.sim.enteredCall = self.callEntry.stringValue.uppercased()
+            }
+        }
+
         exch1Entry.placeholderString = "Exch1"
         exch1Entry.target = self
         exch1Entry.action = #selector(exch1Entered)
@@ -391,21 +405,21 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
             l.font = bold ? NSFont.boldSystemFont(ofSize: 12) : NSFont.systemFont(ofSize: 12)
             return l
         }
-        for l in [rawPtsLabel, rawMultLabel, rawScoreLabel,
-                  verPtsLabel, verMultLabel, verScoreLabel] {
+        for l in [rawQsoLabel, rawPtsLabel, rawMultLabel, rawScoreLabel,
+                  verQsoLabel, verPtsLabel, verMultLabel, verScoreLabel] {
             l.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         }
-        func scoreColumn(_ title: String, _ pts: NSTextField, _ mult: NSTextField,
-                         _ score: NSTextField) -> NSStackView {
-            let v = NSStackView(views: [sideLabel(title, bold: true), pts, mult, score])
+        func scoreColumn(_ title: String, _ qso: NSTextField, _ pts: NSTextField,
+                         _ mult: NSTextField, _ score: NSTextField) -> NSStackView {
+            let v = NSStackView(views: [sideLabel(title, bold: true), qso, pts, mult, score])
             v.orientation = .vertical
             v.alignment = .leading
             v.spacing = 4
             return v
         }
         let scoreInner = NSStackView(views: [
-            scoreColumn("Raw", rawPtsLabel, rawMultLabel, rawScoreLabel),
-            scoreColumn("Verified", verPtsLabel, verMultLabel, verScoreLabel),
+            scoreColumn("Raw", rawQsoLabel, rawPtsLabel, rawMultLabel, rawScoreLabel),
+            scoreColumn("Verified", verQsoLabel, verPtsLabel, verMultLabel, verScoreLabel),
         ])
         scoreInner.orientation = .horizontal
         scoreInner.spacing = 24
@@ -491,9 +505,11 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
                                      columnIndexes: IndexSet(integersIn: 0..<self.logTable.tableColumns.count))
         }
         SimEngine.shared.uiHooks.onStatsUpdate = { [weak self] s in
+            self?.rawQsoLabel.stringValue = "Qso: \(s.qsoCount)"
             self?.rawPtsLabel.stringValue = "Pts: \(s.points)"
             self?.rawMultLabel.stringValue = "Mult: \(s.mults)"
             self?.rawScoreLabel.stringValue = "Score: \(s.points * s.mults)"
+            self?.verQsoLabel.stringValue = "Qso: \(s.verifiedQsoCount)"
             self?.verPtsLabel.stringValue = "Pts: \(s.verifiedPoints)"
             self?.verMultLabel.stringValue = "Mult: \(s.verifiedMults)"
             self?.verScoreLabel.stringValue = "Score: \(s.verifiedPoints * s.verifiedMults)"
