@@ -218,7 +218,7 @@ final class MorseRunnerCoreTests: XCTestCase {
 
         let sim = SimController.shared
         sim.enteredCall = "K1ABC"
-        contest.me.sendText("<his>")
+        sim.sendMsg(.hisCall)
         XCTAssertEqual(contest.me.hisCall, "K1ABC")
 
         // Let the first audio block leave the station, then correct only the
@@ -228,6 +228,15 @@ final class MorseRunnerCoreTests: XCTestCase {
         sim.enteredCall = "K1ABD"
         XCTAssertEqual(contest.me.hisCall, "K1ABD")
         sim.wipeBoxes()
+    }
+
+    /// Updating the entry field before any transmission is queued must be a
+    /// no-op.  This is the normal path while typing the first callsign
+    /// character after starting a run.
+    func testCallsignEditBeforeTransmissionDoesNotTrap() {
+        let station = MyStation()
+        XCTAssertFalse(station.updateCallInMessage("K"))
+        XCTAssertEqual(station.hisCall, "")
     }
 
     /// Keyer: character spacing inside a single callsign must be the
