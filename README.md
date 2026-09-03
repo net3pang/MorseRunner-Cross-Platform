@@ -115,13 +115,24 @@ Sources/
 
 ## 已修复的关键问题（早期 Swift 尝试的 bug）
 
-### 第十四轮修改
+### 第十四轮修改（社区贡献：PR #2 / PR #3）
+
+**PR #3（[wzh06 / Lewis](https://github.com/wzh06)）**
 
 1. **结果窗新增 QSO 计数**：窗口右上角的 Raw / Verified 两列表格新增首行
   `Qso`；Raw 列显示当前日志中的初始 QSO 数量，Verified 列显示已验证（无错误）
   的 QSO 数量，并随统计结果实时更新。
 2. **允许提前按回车发送**：呼号尚未完全输入时即可按下回车开始发送，发送过程中仍可继续修改呼号；已发出的部分保持不变，尚未发送的部分会实时更新。
 3. **降低回车后的发送延迟**：调整音频发送队列和轮询间隔，使按下回车后能更快开始发射，目标延迟控制在约 50 ms，同时保持无音频设备时的正常模拟时钟速度。
+4. **顺带修复两个崩溃点**：发送中修改呼号时 `envelope` 已排空/变短的越界访问，
+  以及 `pieces` 为空时 `1..<0` 无效区间导致的 trap；并新增回归测试覆盖。
+
+**PR #2（[YitsunChu](https://github.com/YitsunChu)）**
+
+5. **Touch Bar 显示问题修复**：WPM 输入框改用无候选词条的 `NoCandidateTextField`；
+   `CallInputFormatter`（统一大写、禁中文输入、关闭自动补全）扩展到我的呼号、
+   发送交换字与 WPM 输入框；开始编辑输入框时重新挂载窗口 Touch Bar，避免
+   Touch Bar 被系统清掉或被候选词条顶掉后不再显示。
 
 ### 第十三轮修复（合入 PR #1 + 用户实测反馈）
 
@@ -279,6 +290,16 @@ Sources/
 - [ ] WAV 播放（已有录音 `--wav`，播放器待做）
 - [ ] 与 N1MM / DXLog 的 UDP 接口
 - [ ] `swift test` 单元测试目标（目前是独立的 EngineTest 可执行）
+
+## 贡献者 (Contributors)
+
+| 贡献者 | 角色 / 贡献 |
+|--------|-------------|
+| [BH5HIE](https://github.com/net3pang) | 项目维护者；Swift 跨平台重构与逐轮修复 |
+| [YitsunChu](https://github.com/YitsunChu) | PR #1 Touch Bar 支持与输入优化；PR #2 Touch Bar 显示问题修复 |
+| [wzh06 / Lewis](https://github.com/wzh06) | PR #3 结果窗 QSO 计数、发送中改呼号、发送延迟优化与崩溃修复 |
+
+感谢所有通过 PR、实测反馈和建议帮助改进项目的朋友。欢迎 Fork + PR！
 
 ## 许可
 
