@@ -24,9 +24,17 @@ final class AVAudioBackend: AudioBackend, @unchecked Sendable {
     private let format: AVAudioFormat
     /// Total samples scheduled to the player (main-thread only).
     private var scheduledSamples = 0
-    /// Lead time in blocks (~46 ms each). 8 blocks ≈ 370 ms of buffered
-    /// audio — enough to survive main-thread hiccups without audible gaps.
-    private let leadBlocks = 8
+    /// Lead time in blocks (~46 ms each). Keep a single block queued so an
+    /// Enter-key transmission starts within the requested 50 ms latency.
+    /// A larger lead would make the response feel noticeably delayed.
+    private let leadBlocks = 1
+    /// Poll frequently enough that a newly entered callsign is picked up
+    /// without adding a full 20 ms timer tick to the audio-buffer latency.
+    private let fillInterval: TimeInterval = 0.001
+    /// Silent fallback keeps the original two-ticks-per-block pacing; using
+    /// the low-latency audio polling interval here would run the simulation
+    /// much faster than real time.
+    private let silentFillInterval: TimeInterval = 0.02
     private var timer: Timer?
     private var blockProvider: (() -> SampleArray)?
 
@@ -51,7 +59,7 @@ final class AVAudioBackend: AudioBackend, @unchecked Sendable {
         guard playerReady else {
             // No usable audio device: keep the timer running so the
             // simulation advances silently (same as SilentAudioBackend).
-            let t = Timer(timeInterval: 0.02, repeats: true) { [weak self] _ in
+            let t = Timer(timeInterval: silentFillInterval, repeats: true) { [weak self] _ in
                 self?.fillSilently()
             }
             RunLoop.main.add(t, forMode: .common)
@@ -67,7 +75,7 @@ final class AVAudioBackend: AudioBackend, @unchecked Sendable {
         player.play()
         // prime the lead
         fill()
-        let t = Timer(timeInterval: 0.02, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: fillInterval, repeats: true) { [weak self] _ in
             self?.fill()
         }
         RunLoop.main.add(t, forMode: .common)
