@@ -505,11 +505,11 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
                                      columnIndexes: IndexSet(integersIn: 0..<self.logTable.tableColumns.count))
         }
         SimEngine.shared.uiHooks.onStatsUpdate = { [weak self] s in
-            self?.rawQsoLabel.stringValue = "qso: \(s.qsoCount)"
+            self?.rawQsoLabel.stringValue = "Qso: \(s.qsoCount)"
             self?.rawPtsLabel.stringValue = "Pts: \(s.points)"
             self?.rawMultLabel.stringValue = "Mult: \(s.mults)"
             self?.rawScoreLabel.stringValue = "Score: \(s.points * s.mults)"
-            self?.verQsoLabel.stringValue = "qso: \(s.verifiedQsoCount)"
+            self?.verQsoLabel.stringValue = "Qso: \(s.verifiedQsoCount)"
             self?.verPtsLabel.stringValue = "Pts: \(s.verifiedPoints)"
             self?.verMultLabel.stringValue = "Mult: \(s.verifiedMults)"
             self?.verScoreLabel.stringValue = "Score: \(s.verifiedPoints * s.verifiedMults)"
