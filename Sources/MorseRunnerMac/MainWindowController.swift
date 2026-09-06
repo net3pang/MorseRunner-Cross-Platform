@@ -665,6 +665,21 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
             let mods = event.modifierFlags
             let keyCode = event.keyCode
 
+            // Handle Return while a QSO field is actively edited.  AppKit's
+            // NSTextField action can arrive before the field editor commits
+            // its last character, which makes an immediate (early) Return
+            // intermittently lose the key or use stale input.  Read the
+            // editor directly and drive the same flow once, then consume the
+            // event so the control action cannot fire a second time.
+            if keyCode == 36 || keyCode == 76 {
+                let entry = (self.window?.firstResponder as? NSTextView)?.delegate as? NSTextField
+                if entry === self.callEntry || entry === self.exch1Entry || entry === self.exch2Entry {
+                    self.syncEntryFields()
+                    self.sim.enterKeyPressed()
+                    return nil
+                }
+            }
+
             // function keys (sync typed call/exchange first)
             if let idx = f1toF8.firstIndex(of: keyCode) {
                 self.syncEntryFields()
