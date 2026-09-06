@@ -230,6 +230,21 @@ public class Station {
         timeout = never
     }
 
+    /// Stop any in-flight transmission without generating a `msgSent` event.
+    ///
+    /// A normal abort (Esc) deliberately raises the message-sent event so the
+    /// contest state machine can continue.  At the end of a timed run there
+    /// must be no such follow-up: an unfinished transmission is not a
+    /// completed QSO and must remain unverified.
+    func stopTransmission() {
+        envelope = nil
+        sendPos = 0
+        msg = .none
+        msgText = ""
+        timeout = never
+        state = .listening
+    }
+
     /// Per-block simulation step (Delphi `Tick`).
     func tick() {
         if state == .sending && envelope == nil {

@@ -7,8 +7,6 @@
 import AppKit
 import MorseRunnerCore
 
-/// Forces text fields to uppercase as the user types (Delphi OnChange
-/// behavior for the call/exchange entry fields).
 // MARK: - TouchBar Identifiers
 extension NSTouchBarItem.Identifier {
     static let runStop   = NSTouchBarItem.Identifier("com.morserunner.runstop")
@@ -20,48 +18,19 @@ extension NSTouchBarItem.Identifier {
     static let qm        = NSTouchBarItem.Identifier("com.morserunner.qm")
 }
 
-// MARK: - Formatters & Custom Controls
+// MARK: - Input controls
 
-//Force uppercase English letters, numbers, and forward slashes;
-//disable Chinese input methods and prevent the Touch Bar from displaying a candidate word bar.
-private final class CallInputFormatter: Formatter {
-    private let allowedCharacters = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/ ")
-
-    override func string(for obj: Any?) -> String? {
-        return (obj as? String)?.uppercased()
-    }
-
-    override func getObjectValue(
-        _ obj: AutoreleasingUnsafeMutablePointer<AnyObject?>?,
-        for string: String,
-        errorDescription error: AutoreleasingUnsafeMutablePointer<NSString?>?
-    ) -> Bool {
-        obj?.pointee = string.uppercased() as NSString
-        return true
-    }
-
-    override func isPartialStringValid(
-        _ partialString: String,
-        newEditingString newString: AutoreleasingUnsafeMutablePointer<NSString?>?,
-        errorDescription error: AutoreleasingUnsafeMutablePointer<NSString?>?
-    ) -> Bool {
-        let upper = partialString.uppercased()
-        
-        // Filter out illegal characters
-        let isAllowed = upper.unicodeScalars.allSatisfy { allowedCharacters.contains($0) }
-        if !isAllowed { return false }
-
-        // Lowercase characters are automatically converted to uppercase
-        if upper != partialString {
-            newString?.pointee = upper as NSString
-            return false
-        }
-        return true
-    }
-}
+/// Callsign and exchange fields accept the same character set as the
+/// original application.  This is intentionally enforced by the field
+/// editor delegate below instead of an NSTextField formatter: replacing the
+/// formatter's entire partial string makes AppKit lose the current selection,
+/// so an insertion in the middle can unexpectedly be moved to the end.
+private let callInputAllowedCharacters = CharacterSet(
+    charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/ "
+)
 
 // Disables the built-in Touch Bar candidate words in the input box
-final class NoCandidateTextField: NSTextField {
+class NoCandidateTextField: NSTextField {
     override func makeTouchBar() -> NSTouchBar? {
         return nil
     }
@@ -75,21 +44,68 @@ final class NoCandidateTextField: NSTextField {
     }
 }
 
+/// Text field whose field editor validates each replacement in place.
+///
+/// AppKit makes the active NSTextField the field editor's delegate, so this
+/// callback belongs on the control itself rather than on the window
+/// controller's NSTextFieldDelegate.  Keeping the replacement local preserves
+/// the editor selection when typing in the middle of a callsign.
+final class CallInputTextField: NoCandidateTextField, NSTextViewDelegate {
+    private var isNormalizingInput = false
+
+    func textView(
+        _ textView: NSTextView,
+        shouldChangeTextIn affectedCharRange: NSRange,
+        replacementString: String?
+    ) -> Bool {
+        guard let replacementString else { return true }
+
+        let normalized = replacementString.uppercased()
+        guard normalized.unicodeScalars.allSatisfy({
+            callInputAllowedCharacters.contains($0)
+        }) else {
+            return false
+        }
+
+        // Uppercase input can use NSTextView's normal editing path, which
+        // preserves selection and undo behavior without any extra work.
+        guard normalized != replacementString else { return true }
+
+        // Replacing the edit from inside this callback invokes the delegate
+        // once more.  Let that nested call perform the actual replacement,
+        // while the outer call restores the exact post-edit caret position.
+        if isNormalizingInput { return true }
+        isNormalizingInput = true
+        defer { isNormalizingInput = false }
+        // Use NSTextView's editing API so the normal text-change notification
+        // and undo bookkeeping are emitted for the field control.
+        textView.insertText(normalized, replacementRange: affectedCharRange)
+
+        let end = min(
+            affectedCharRange.location + (normalized as NSString).length,
+            (textView.string as NSString).length
+        )
+        textView.setSelectedRange(NSRange(location: end, length: 0))
+        return false
+    }
+}
+
 // MARK: - MainWindowController
 
 @MainActor
-public final class MainWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
+public final class MainWindowController: NSWindowController, NSTableViewDataSource,
+    NSTableViewDelegate, NSTextFieldDelegate {
     private let sim = SimController.shared
 
     // ---- top strip
     private let contestCombo = NSPopUpButton()
-    private let callField = NSTextField(string: Settings.call)
-    private let exchangeField = NSTextField(string: "")
+    private let callField = CallInputTextField(string: Settings.call)
+    private let exchangeField = CallInputTextField(string: "")
     private let runButton = NSButton(title: "Run", target: nil, action: nil)
     private let modeCombo = NSPopUpButton()
 
     // ---- band strip
-    private let wpmField = NoCandidateTextField(string: "25")
+    private let wpmField = CallInputTextField(string: "25")
     private let wpmStepper: NSStepper = {
         let s = NSStepper()
         s.minValue = 10
@@ -116,9 +132,9 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
     private let outputVolumeSlider = NSSlider(value: 0.35, minValue: 0, maxValue: 1, target: nil, action: nil)
 
     // ---- entry
-    private let callEntry = NoCandidateTextField(string: "")
-    private let exch1Entry = NoCandidateTextField(string: "")
-    private let exch2Entry = NoCandidateTextField(string: "")
+    private let callEntry = CallInputTextField(string: "")
+    private let exch1Entry = CallInputTextField(string: "")
+    private let exch2Entry = CallInputTextField(string: "")
     private let exch1Label = NSTextField(labelWithString: "RST")
     private let exch2Label = NSTextField(labelWithString: "Exch")
 
@@ -270,11 +286,11 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
         for b in stride(from: 100, through: 1000, by: 50) {
             bwCombo.addItem(withTitle: "\(b) Hz")
         }
-        // uppercase as-you-type for call / exchange fields
-
-        let inputFormatter = CallInputFormatter()
+        // Uppercase and validate call/exchange input in the field editor
+        // delegate.  An NSTextField formatter replaces the whole partial
+        // string while typing, which resets the selection in AppKit.
         for field in [callField, exchangeField, wpmField, callEntry, exch1Entry, exch2Entry] {
-            field.formatter = inputFormatter
+            field.delegate = self
             field.isAutomaticTextCompletionEnabled = false
         }
 
@@ -326,7 +342,7 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.sim.enteredCall = self.callEntry.stringValue.uppercased()
+                self.sim.enteredCall = self.currentInputText(self.callEntry)
             }
         }
 
@@ -598,7 +614,7 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
         // initial contest + widgets
         sim.setContest(Settings.simContest)
         contestCombo.selectItem(at: Settings.simContest.rawValue)
-        callField.stringValue = Settings.call
+        callField.stringValue = Settings.call.uppercased()
         exchangeField.stringValue = sim.exchangeEdit
         wpmField.stringValue = String(Settings.wpm)
         wpmStepper.integerValue = Settings.wpm
@@ -622,10 +638,19 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
 
     /// Copy the entry fields into the controller before sending a message,
     /// so HisCall uses the call currently being typed (not the previous QSO).
+    ///
+    /// While a text field is being edited, AppKit keeps the newest characters
+    /// in its field editor until the edit is committed.  Reading only
+    /// `stringValue` here can therefore lag behind the visible text when the
+    /// operator presses Return immediately after typing a character.
+    private func currentInputText(_ field: NSTextField) -> String {
+        (field.currentEditor()?.string ?? field.stringValue).uppercased()
+    }
+
     private func syncEntryFields() {
-        sim.enteredCall = callEntry.stringValue.uppercased()
-        sim.enteredExch1 = exch1Entry.stringValue.uppercased()
-        sim.enteredExch2 = exch2Entry.stringValue.uppercased()
+        sim.enteredCall = currentInputText(callEntry)
+        sim.enteredExch1 = currentInputText(exch1Entry)
+        sim.enteredExch2 = currentInputText(exch2Entry)
     }
 
     /// Global key handling (port of FormKeyDown/FormKeyPress): function keys
@@ -960,7 +985,7 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
 
     @objc private func callEntryEntered(_ sender: Any) {
         // Press Enter to disable the selection of all content in the input box.
-        sim.enteredCall = callEntry.stringValue.uppercased()
+        syncEntryFields()
         sim.enterKeyPressed()
         
         DispatchQueue.main.async { [weak self] in
@@ -968,21 +993,18 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
                   let editor = self.callEntry.currentEditor() else { return }
             
             // Set the selection length to 0 (i.e., disable highlighting), and place it at the end of the text.
-            let endLocation = self.callEntry.stringValue.count
+            let endLocation = self.currentInputText(self.callEntry).count
             editor.selectedRange = NSRange(location: endLocation, length: 0)
         }
     }
 
     @objc private func exch1Entered() {
-        sim.enteredCall = callEntry.stringValue.uppercased()
-        sim.enteredExch1 = exch1Entry.stringValue.uppercased()
+        syncEntryFields()
         sim.enterKeyPressed()
     }
 
     @objc private func exch2Entered() {
-        sim.enteredCall = callEntry.stringValue.uppercased()
-        sim.enteredExch1 = exch1Entry.stringValue.uppercased()
-        sim.enteredExch2 = exch2Entry.stringValue.uppercased()
+        syncEntryFields()
         sim.enterKeyPressed()
     }
 
