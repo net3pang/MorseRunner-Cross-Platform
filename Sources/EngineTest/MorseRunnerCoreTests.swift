@@ -688,6 +688,52 @@ final class MorseRunnerCoreTests: XCTestCase {
         print("RUNEXP: handled=\(SimEngine.shared.stopHandled) fires=\(stoppedCount)")
     }
 
+    /// The deadline must interrupt an in-flight transmission immediately.
+    /// A QSO saved before the DX finishes remains NIL/error instead of being
+    /// drained and verified during an end-of-run grace period.
+    func testRunExpiryStopsTransmissionAndLeavesPendingQsoUnverified() {
+        Settings.simContest = .wpx
+        Settings.call = "BH5HIE"
+        Settings.runMode = .pileup
+        Settings.duration = 1
+        Settings.activity = 0
+        Settings.qsb = false
+        Settings.qrm = false
+        Settings.qrn = false
+        Log.shared.clear()
+
+        let contest = CqWpx()
+        Contest.shared = contest
+        contest.initContest()
+        _ = contest.onSetMyCall(Settings.call)
+
+        let pending = Qso()
+        pending.call = "K1ABC"
+        pending.exch1 = "599"
+        pending.exch2 = "1"
+        Log.shared.qsoList = [pending]
+        Log.shared.checkErr()
+
+        contest.me.sendMsg(.cq)
+        let interference = contest.stations.addQrn()
+        XCTAssertEqual(contest.me.state, .sending)
+        XCTAssertEqual(interference.state, .sending)
+        let deadlineBlock = RndFunc.secondsToBlocks(Float(Settings.duration) * 60)
+        contest.blockNumber = deadlineBlock - 1
+
+        let audio = contest.getAudio()
+
+        XCTAssertEqual(Settings.runMode, .stop)
+        XCTAssertTrue(SimEngine.shared.stopHandled)
+        XCTAssertNotEqual(contest.me.state, .sending)
+        XCTAssertNil(contest.me.envelope)
+        XCTAssertNotEqual(interference.state, .sending)
+        XCTAssertNil(interference.envelope)
+        XCTAssertEqual(audio, [0])
+        XCTAssertEqual(Log.shared.qsoList.last?.err, LogError.nil_.display)
+        XCTAssertEqual(Log.shared.qsoList.last?.trueCall, "")
+    }
+
     func testCallPersistence() {
         let original = Settings.call
         Settings.call = "XX9ZZ"

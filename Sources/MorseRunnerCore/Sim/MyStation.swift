@@ -73,6 +73,14 @@ public final class MyStation: Station {
         processEvent(.msgSent)
     }
 
+    /// End-of-run stop that must not call `onMeFinishedSending` or advance the
+    /// DX state machine.  Clear the queued callsign pieces as well as the
+    /// base station's current envelope.
+    override func stopTransmission() {
+        super.stopTransmission()
+        pieces.removeAll()
+    }
+
     override func sendText(_ aMsg: String) {
 
         // some exchange field types have specific behaviors

@@ -26,7 +26,6 @@ public class Contest {
 
     // ---- internal state
     private var lastLoadCallsign = ""
-    private var endSessionDrainDeadlineBlock = -1
     private var qsoCountSinceStationID = 0
     private var stationIdRate = Settings.stationIdRate
     private var farnsworthEnabled = false
@@ -71,7 +70,11 @@ public class Contest {
         qsoCountSinceStationID = 0
         farnsworthEnabled = false
         Settings.noActivityCnt = 0   // original TContest.Init resets this
-        endSessionDrainDeadlineBlock = -1
+        // A contest can also be driven directly by the headless engine/tests,
+        // so reset the per-run stop guards here as well as in SimController.
+        SimEngine.shared.stopHandled = false
+        SimEngine.shared.stopRequested = false
+        SimEngine.shared.runExpired = false
         callerStartDelayInBlocks = RndFunc.secondsToBlocks(Float(Settings.singleCallStartDelay) / 1000) + 5
     }
 
@@ -351,30 +354,6 @@ public class Contest {
         return result
     }
 
-    private func shouldDrainEndSessionQso() -> Bool {
-        let endSessionDrainSeconds = 15
-        func hasPendingEndSessionQso() -> Bool {
-            guard let last = Log.shared.qsoList.last, last.trueCall == "",
-                  me.msg.contains(.tu) else { return false }
-            for i in stride(from: stations.count - 1, through: 0, by: -1) {
-                if let dx = stations[i] as? DxStation,
-                   [.yes, .almost].contains(dx.oper.callConfidenceCheck(last.call, randomResult: false)) {
-                    return true
-                }
-            }
-            return false
-        }
-        let result = hasPendingEndSessionQso()
-        if !result {
-            endSessionDrainDeadlineBlock = -1
-            return false
-        }
-        if endSessionDrainDeadlineBlock < 0 {
-            endSessionDrainDeadlineBlock = blockNumber + RndFunc.secondsToBlocks(Float(endSessionDrainSeconds))
-        }
-        return blockNumber <= endSessionDrainDeadlineBlock
-    }
-
     private func swapFilters() {
         let f = filt
         filt = filt2
@@ -390,7 +369,30 @@ public class Contest {
         let noiseAmp: Float = 6000
         var result: SampleArray = [0]
 
+        // The audio backend can make a few callbacks while it is winding down
+        // after a stop.  Once the run is stopped, do not tick stations or emit
+        // any more receive/transmit audio from those callbacks.
+        if Settings.runMode == .stop {
+            return result
+        }
+
         blockNumber += 1
+
+        // Check the limit before mixing audio or advancing any station.  This
+        // makes the block at the deadline silent and prevents a partially sent
+        // message from being completed (and its QSO from being verified) after
+        // time has expired.
+        let timeExpired = RndFunc.blocksToSeconds(Float(blockNumber)) >= Float(Settings.duration) * 60
+        let stopRequested = SimEngine.shared.stopRequested
+        if timeExpired || stopRequested {
+            // Preserve the final clock display from the normal end-of-block
+            // path even though no audio or station tick is allowed at the
+            // deadline.
+            SimEngine.shared.uiHooks.onClockUpdate?(clockText())
+            finishRun(timeExpired: timeExpired && !stopRequested)
+            return result
+        }
+
         if blockNumber < 6 { return result }
 
         // complex noise
@@ -509,12 +511,10 @@ public class Contest {
             SimEngine.shared.uiHooks.onPileupCount?(dxCount())
         }
 
-        let timeExpired = RndFunc.blocksToSeconds(Float(blockNumber)) >= Float(Settings.duration) * 60
-
-        if !timeExpired && Settings.runMode == .single && dxCount() == 0 && blockNumber > callerStartDelayInBlocks {
+        if Settings.runMode == .single && dxCount() == 0 && blockNumber > callerStartDelayInBlocks {
             me.msg = .cq  // no need to send CQ in this mode
             stations.addCaller()?.processEvent(.meFinished)
-        } else if !timeExpired && Settings.runMode == .hst && dxCount() < Settings.activity {
+        } else if Settings.runMode == .hst && dxCount() < Settings.activity {
             me.msg = .cq
             let count = Settings.activity - dxCount()
             if count > 0 {
@@ -524,24 +524,41 @@ public class Contest {
             }
         }
 
-        if timeExpired || SimEngine.shared.stopRequested {
-            if timeExpired && !SimEngine.shared.stopRequested && shouldDrainEndSessionQso() {
-                return result
-            }
-            if !SimEngine.shared.stopHandled {
-                SimEngine.shared.stopHandled = true
-                if timeExpired && !SimEngine.shared.stopRequested {
-                    SimEngine.shared.runExpired = true
-                }
-                endSessionDrainDeadlineBlock = -1
-                Settings.runMode = .stop
-                SimEngine.shared.stopRequested = false
-                SimEngine.shared.uiHooks.onRunStopped?()
-            }
-            // return silence while the pump winds down
-            return result
-        }
         return result
+    }
+
+    /// Stop every station and finalize the run exactly once.
+    private func finishRun(timeExpired: Bool) {
+        guard !SimEngine.shared.stopHandled else { return }
+
+        SimEngine.shared.stopHandled = true
+        if timeExpired {
+            SimEngine.shared.runExpired = true
+        }
+
+        // Do not use MyStation.abortSend(): it emits `.msgSent`, which can
+        // spawn callers or otherwise advance a QSO after the deadline.
+        me.stopTransmission()
+        for station in stations.items {
+            station.stopTransmission()
+        }
+
+        if timeExpired {
+            // A QSO saved immediately before the deadline may still have no
+            // true callsign because the matching DX station did not finish.
+            // Re-check it now so it is displayed and scored as NIL/error,
+            // never as a verified QSO.  No DX data is copied after expiry.
+            Log.shared.checkErr()
+            if Settings.simContest == .hst {
+                Log.shared.updateStatsHst()
+            } else {
+                Log.shared.updateStats(verifyResults: true)
+            }
+        }
+
+        Settings.runMode = .stop
+        SimEngine.shared.stopRequested = false
+        SimEngine.shared.uiHooks.onRunStopped?()
     }
 
     private func clockText() -> String {
