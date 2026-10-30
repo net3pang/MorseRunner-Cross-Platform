@@ -44,6 +44,62 @@ class NoCandidateTextField: NSTextField {
     }
 }
 
+/// IMEs update marked text without posting NSControl.textDidChangeNotification.
+/// Report the visible Latin preedit as well, so a callsign being transmitted
+/// follows what the operator sees before they confirm an IME candidate.
+final class CallInputFieldEditor: NSTextView {
+    private(set) var isUpdatingMarkedText = false
+    private var previousInputSettings: (source: String?, locales: [String]?)?
+
+    override func becomeFirstResponder() -> Bool {
+        guard super.becomeFirstResponder() else { return false }
+        useEnglishInputSource()
+        return true
+    }
+
+    override func resignFirstResponder() -> Bool {
+        guard super.resignFirstResponder() else { return false }
+        restoreInputSource()
+        return true
+    }
+
+    func useEnglishInputSource() {
+        guard previousInputSettings == nil, let context = inputContext else { return }
+        previousInputSettings = (context.selectedKeyboardInputSource, context.allowedInputSourceLocales)
+        context.allowedInputSourceLocales = [NSAllRomanInputSourcesLocaleIdentifier]
+        let sources = context.keyboardInputSources ?? []
+        if let english = ["com.apple.keylayout.ABC", "com.apple.keylayout.US"].first(where: sources.contains) {
+            context.selectedKeyboardInputSource = english
+        }
+    }
+
+    func restoreInputSource() {
+        guard let previous = previousInputSettings, let context = inputContext else { return }
+        context.allowedInputSourceLocales = previous.locales
+        context.selectedKeyboardInputSource = previous.source
+        previousInputSettings = nil
+    }
+
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        isUpdatingMarkedText = true
+        defer { isUpdatingMarkedText = false }
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        (delegate as? CallInputTextField)?.visibleTextChanged?(self.string.uppercased())
+    }
+
+    func confirmMarkedInput() {
+        guard hasMarkedText() else { return }
+        let range = markedRange()
+        let text = (string as NSString).substring(with: range)
+        unmarkText()
+        inputContext?.discardMarkedText()
+        if text != text.uppercased() {
+            insertText(text.uppercased(), replacementRange: range)
+        }
+        setSelectedRange(NSRange(location: range.location + (text as NSString).length, length: 0))
+    }
+}
+
 /// Text field whose field editor validates each replacement in place.
 ///
 /// AppKit makes the active NSTextField the field editor's delegate, so this
@@ -52,6 +108,7 @@ class NoCandidateTextField: NSTextField {
 /// the editor selection when typing in the middle of a callsign.
 final class CallInputTextField: NoCandidateTextField, NSTextViewDelegate {
     private var isNormalizingInput = false
+    var visibleTextChanged: ((String) -> Void)?
 
     func textView(
         _ textView: NSTextView,
@@ -66,6 +123,11 @@ final class CallInputTextField: NoCandidateTextField, NSTextViewDelegate {
         }) else {
             return false
         }
+
+        // Re-entering insertText while an IME is replacing marked text can
+        // corrupt its marked range. Leave the preedit intact; consumers read
+        // its uppercase snapshot from CallInputFieldEditor instead.
+        if (textView as? CallInputFieldEditor)?.isUpdatingMarkedText == true { return true }
 
         // Uppercase input can use NSTextView's normal editing path, which
         // preserves selection and undo behavior without any extra work.
@@ -94,8 +156,13 @@ final class CallInputTextField: NoCandidateTextField, NSTextViewDelegate {
 
 @MainActor
 public final class MainWindowController: NSWindowController, NSTableViewDataSource,
-    NSTableViewDelegate, NSTextFieldDelegate {
+    NSTableViewDelegate, NSTextFieldDelegate, NSWindowDelegate {
     private let sim = SimController.shared
+    private lazy var callFieldEditor: CallInputFieldEditor = {
+        let editor = CallInputFieldEditor()
+        editor.isFieldEditor = true
+        return editor
+    }()
 
     // ---- top strip
     private let contestCombo = NSPopUpButton()
@@ -187,9 +254,24 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
         window.center()
         window.setFrameAutosaveName("MainWindow")
         self.init(window: window)
+        window.delegate = self
         window.contentViewController = buildContent()
         setup()
         balanceSliders()
+    }
+
+    public func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
+        client is CallInputTextField ? callFieldEditor : nil
+    }
+
+    public func windowDidBecomeKey(_ notification: Notification) {
+        if window?.firstResponder === callFieldEditor {
+            callFieldEditor.useEnglishInputSource()
+        }
+    }
+
+    public func windowDidResignKey(_ notification: Notification) {
+        callFieldEditor.restoreInputSource()
     }
 
     // MARK: - Layout
@@ -333,6 +415,9 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
         callEntry.target = self
         callEntry.action = #selector(callEntryEntered)
         callEntry.cell?.sendsActionOnEndEditing = false
+        callEntry.visibleTextChanged = { [weak self] text in
+            self?.sim.enteredCall = text
+        }
 
         // Keep the engine's callsign mirror in sync while the operator types.
         // This is also what enables UpdateCallInMessage to replace trailing
@@ -673,6 +758,7 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
             if keyCode == 36 || keyCode == 76 {
                 let entry = (self.window?.firstResponder as? NSTextView)?.delegate as? NSTextField
                 if entry === self.callEntry || entry === self.exch1Entry || entry === self.exch2Entry {
+                    (entry?.currentEditor() as? CallInputFieldEditor)?.confirmMarkedInput()
                     self.syncEntryFields()
                     self.sim.enterKeyPressed()
                     return nil
@@ -1000,6 +1086,7 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
 
     @objc private func callEntryEntered(_ sender: Any) {
         // Press Enter to disable the selection of all content in the input box.
+        (callEntry.currentEditor() as? CallInputFieldEditor)?.confirmMarkedInput()
         syncEntryFields()
         sim.enterKeyPressed()
         
@@ -1014,11 +1101,13 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
     }
 
     @objc private func exch1Entered() {
+        (exch1Entry.currentEditor() as? CallInputFieldEditor)?.confirmMarkedInput()
         syncEntryFields()
         sim.enterKeyPressed()
     }
 
     @objc private func exch2Entered() {
+        (exch2Entry.currentEditor() as? CallInputFieldEditor)?.confirmMarkedInput()
         syncEntryFields()
         sim.enterKeyPressed()
     }
