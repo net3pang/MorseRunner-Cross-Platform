@@ -504,6 +504,7 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
         logTable.dataSource = self
         logTable.delegate = self
         SimEngine.shared.uiHooks.userName = Settings.hamName
+        monitorSlider.doubleValue = 1 + Double(Settings.monLevel) / 60
         SimEngine.shared.uiHooks.volume = Float(monitorSlider.doubleValue)
 
         // engine -> UI hooks
@@ -627,8 +628,6 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
         qrnCheck.state = Settings.qrn ? .on : .off
         flutterCheck.state = Settings.flutter ? .on : .off
         lidsCheck.state = Settings.lids ? .on : .off
-        SimEngine.shared.uiHooks.volume = 0.75
-        monitorSlider.doubleValue = 0.75
         sim.masterVolume = 0.35
         outputVolumeSlider.doubleValue = 0.35
         updateRitLabel()
@@ -920,6 +919,7 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
     @objc private func monitorChanged() {
         SimEngine.shared.uiHooks.volume = Float(monitorSlider.doubleValue)
         Settings.monLevel = Int((monitorSlider.doubleValue - 1) * 60)
+        Settings.saveToDefaults()
     }
 
     @objc private func outputVolumeChanged() {

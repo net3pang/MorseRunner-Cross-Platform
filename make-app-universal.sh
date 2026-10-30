@@ -123,6 +123,7 @@ xattr -cr "$STAGE" 2>/dev/null || true
 codesign --force --sign - "$STAGE"
 codesign --verify --deep --strict "$STAGE"
 
+mkdir -p "$(dirname "$APP")"
 rm -rf "$APP"
 mv "$STAGE" "$APP"
 trap - EXIT
