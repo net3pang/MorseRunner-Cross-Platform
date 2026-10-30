@@ -11,6 +11,15 @@ import Foundation
 public final class MyStation: Station {
     /// Message pieces split around '<his>'; '@' marks the callsign position.
     private var pieces: [String] = []
+    /// Extra silence committed when a suffix was typed during the call's
+    /// final gap. Keep it when subsequent edits rebuild the same prefix.
+    private struct CallGap {
+        let prefix: String
+        let position: Int  // sample position before any extra gaps
+        let count: Int
+    }
+    private var callGaps: [CallGap] = []
+    private var callSpeed = (wpmS: 0, wpmC: 0)
     /// DXCC entity of the user's call (for user-text status filtering).
     var myEntity = ""
 
@@ -69,6 +78,7 @@ public final class MyStation: Station {
         msg = .garbage
         msgText = ""
         pieces = []
+        callGaps.removeAll()
         state = .listening
         processEvent(.msgSent)
     }
@@ -79,6 +89,7 @@ public final class MyStation: Station {
     override func stopTransmission() {
         super.stopTransmission()
         pieces.removeAll()
+        callGaps.removeAll()
     }
 
     override func sendText(_ aMsg: String) {
@@ -121,6 +132,8 @@ public final class MyStation: Station {
 
     private func sendNextPiece() {
         msgText = ""
+        callGaps.removeAll()
+        callSpeed = (wpmS, wpmC)
 
         if pieces.first != "@" {
             super.sendText(pieces[0])
@@ -158,11 +171,21 @@ public final class MyStation: Station {
         // is the already sent part the same as in the new call?
         if result {
             // create new envelope
-            Keyer.shared.setWpm(wpmS, wpmC)
+            // A WPM change takes effect on the next piece. Rebuilding this
+            // call must retain the timing of the samples already queued.
+            Keyer.shared.setWpm(callSpeed.wpmS, callSpeed.wpmC)
             Keyer.shared.morseMsg = Keyer.shared.encode(aCall)
             var newEnvelope = Keyer.shared.getEnvelope()
             for i in 0..<newEnvelope.count {
                 newEnvelope[i] *= amplitude
+            }
+
+            var gaps = callGaps.filter { aCall.hasPrefix($0.prefix) && aCall != $0.prefix }
+            var addedSilence = 0
+            for gap in gaps {
+                newEnvelope.insert(contentsOf: repeatElement(Float(0), count: gap.count),
+                                   at: gap.position + addedSilence)
+                addedSilence += gap.count
             }
 
             // compare with the old one
@@ -171,10 +194,18 @@ public final class MyStation: Station {
             // shorter envelope while checking the already-sent prefix.
             if let currentEnvelope = envelope, sendPos <= currentEnvelope.count,
                newEnvelope.count >= sendPos {
-                for i in 0..<sendPos {
-                    if currentEnvelope[i] != newEnvelope[i] {
+                if let mismatch = (0..<sendPos).first(where: { currentEnvelope[$0] != newEnvelope[$0] }) {
+                    // An appended letter normally starts after 3U, but the
+                    // short call had an end-of-message gap (and block padding).
+                    // If that silence has already left the station, delay the
+                    // new letter rather than rejecting it or clipping its start.
+                    if !msgText.isEmpty, aCall.hasPrefix(msgText),
+                       currentEnvelope[mismatch...].allSatisfy({ $0 == 0 }) {
+                        let delay = sendPos - mismatch
+                        newEnvelope.insert(contentsOf: repeatElement(Float(0), count: delay), at: mismatch)
+                        gaps.append(CallGap(prefix: msgText, position: mismatch - addedSilence, count: delay))
+                    } else {
                         result = false
-                        break
                     }
                 }
             } else {
@@ -182,8 +213,12 @@ public final class MyStation: Station {
             }
 
             if result {
+                let padding = (Keyer.shared.bufSize - newEnvelope.count % Keyer.shared.bufSize) % Keyer.shared.bufSize
+                newEnvelope.append(contentsOf: repeatElement(Float(0), count: padding))
                 envelope = newEnvelope
                 hisCall = aCall
+                msgText = aCall
+                callGaps = gaps
             }
         }
 

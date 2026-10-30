@@ -239,6 +239,140 @@ final class MorseRunnerCoreTests: XCTestCase {
         XCTAssertEqual(station.hisCall, "")
     }
 
+    /// Return can start a short call before the operator finishes typing.
+    /// Appending during its final silence must retain all of the new letter,
+    /// even when its normal start time has already passed in a queued block.
+    func testEarlyReturnAppendsDuringCallTail() throws {
+        let savedKeyer = Keyer.shared
+        let savedAdvance = SimEngine.shared.mustAdvance
+        let savedOnAdvance = SimEngine.shared.uiHooks.onAdvance
+        let savedCallsFromKeyer = Settings.callsFromKeyer
+        let savedBufSize = Settings.bufSize
+        defer {
+            Keyer.shared = savedKeyer
+            SimEngine.shared.mustAdvance = savedAdvance
+            SimEngine.shared.uiHooks.onAdvance = savedOnAdvance
+            Settings.callsFromKeyer = savedCallsFromKeyer
+            Settings.bufSize = savedBufSize
+        }
+        Settings.callsFromKeyer = false
+        Settings.bufSize = 64
+        SimEngine.shared.uiHooks.onAdvance = nil
+
+        for keyer in [Keyer(), FarnsKeyer()] {
+            Keyer.shared = keyer
+            for speed in [25, 60, 120] {
+                let station = MyStation()
+                station.wpmS = speed
+                station.wpmC = speed
+                station.hisCall = "K1A"
+                station.sendText("<his> 5NN")
+                let original = try XCTUnwrap(station.envelope)
+
+                keyer.setWpm(speed, speed)
+                keyer.morseMsg = keyer.encode("K1AB")
+                let full = keyer.getEnvelope().map { $0 * station.amplitude }
+                let suffixStart = try XCTUnwrap(zip(original, full).enumerated().first {
+                    $0.element.0 != $0.element.1
+                }?.offset)
+                // Consume a block that includes the normal start of B, while
+                // the original shorter call still has only silence there.
+                while station.sendPos <= suffixStart {
+                    _ = station.getBlock()
+                }
+                let committed = station.sendPos
+                XCTAssertNotNil(station.envelope, "Test must edit before the short call drains")
+                SimEngine.shared.mustAdvance = true
+
+                let updatedCall = station.updateCallInMessage("K1AB")
+                XCTAssertTrue(updatedCall, "\(type(of: keyer)) at \(speed) WPM")
+                guard updatedCall else { continue }
+                XCTAssertEqual(station.hisCall, "K1AB")
+                XCTAssertEqual(station.msgText, "K1AB")
+                let updated = try XCTUnwrap(station.envelope)
+                XCTAssertEqual(Array(updated.prefix(committed)), Array(original.prefix(committed)))
+                XCTAssertEqual(Array(updated[committed..<(committed + full.count - suffixStart)]),
+                               Array(full[suffixStart...]), "The appended letter must be sent in full")
+
+                // Type the next letter late as well. Both inserted delays
+                // must survive later edits of the still-unsent suffix.
+                keyer.morseMsg = keyer.encode("K1ABC")
+                var extended = keyer.getEnvelope().map { $0 * station.amplitude }
+                extended.insert(contentsOf: repeatElement(Float(0), count: committed - suffixStart),
+                                at: suffixStart)
+                let nextSuffixStart = try XCTUnwrap(zip(updated, extended).enumerated().first {
+                    $0.element.0 != $0.element.1
+                }?.offset)
+                while station.sendPos <= nextSuffixStart { _ = station.getBlock() }
+                XCTAssertNotNil(station.envelope)
+                XCTAssertTrue(station.updateCallInMessage("K1ABC"))
+                XCTAssertEqual(station.msgText, "K1ABC")
+                XCTAssertTrue(SimEngine.shared.mustAdvance, "Keep focus on Call until it finishes")
+
+                // A later edit must retain the inserted silence, even when
+                // the speed control has changed during this transmission.
+                station.wpmS = speed + 5
+                station.wpmC = speed + 5
+                XCTAssertTrue(station.updateCallInMessage("K1ABD"))
+                XCTAssertEqual(station.msgText, "K1ABD")
+                let beforeRejectedEdit = station.envelope
+                XCTAssertFalse(station.updateCallInMessage("W1ABD"), "Cannot rewrite transmitted K")
+                XCTAssertEqual(station.envelope, beforeRejectedEdit)
+                XCTAssertEqual(station.hisCall, "K1ABD")
+                let blocksLeft = (station.envelope?.count ?? 0) / Settings.bufSize + 1
+                for _ in 0..<blocksLeft where station.msgText == "K1ABD" {
+                    _ = station.getBlock()
+                }
+                XCTAssertEqual(station.msgText, " 5NN", "Send the queued exchange after the complete call")
+                XCTAssertFalse(SimEngine.shared.mustAdvance)
+                station.stopTransmission()
+            }
+        }
+    }
+
+    /// Check every audio-block boundary, including the default 512-sample
+    /// buffers. The old code rejected appends near the end of the short call.
+    func testEarlyReturnAppendAtEveryBlockBoundary() throws {
+        let savedKeyer = Keyer.shared
+        let savedBufSize = Settings.bufSize
+        let savedCallsFromKeyer = Settings.callsFromKeyer
+        let savedAdvance = SimEngine.shared.mustAdvance
+        defer {
+            Keyer.shared = savedKeyer
+            Settings.bufSize = savedBufSize
+            Settings.callsFromKeyer = savedCallsFromKeyer
+            SimEngine.shared.mustAdvance = savedAdvance
+        }
+        Settings.callsFromKeyer = false
+        for keyer in [Keyer(), FarnsKeyer()] {
+            Keyer.shared = keyer
+            for speed in [25, 60, 120] {
+                for bufferSize in [64, 512] {
+                    Settings.bufSize = bufferSize
+                    keyer.setWpm(speed, speed)
+                    keyer.morseMsg = keyer.encode("K1A")
+                    let blockCount = keyer.getEnvelope().count / bufferSize
+                    for blocks in 0..<blockCount {
+                        let station = MyStation()
+                        station.wpmS = speed
+                        station.wpmC = speed
+                        station.hisCall = "K1A"
+                        station.sendText("<his> 5NN")
+                        var emitted: SampleArray = []
+                        for _ in 0..<blocks { emitted += station.getBlock() }
+                        XCTAssertTrue(station.updateCallInMessage("K1ABC"),
+                                      "\(type(of: keyer)), \(speed) WPM, buffer \(bufferSize), block \(blocks)")
+                        let updated = try XCTUnwrap(station.envelope)
+                        XCTAssertEqual(Array(updated.prefix(emitted.count)), emitted)
+                        XCTAssertEqual(updated.count % keyer.bufSize, 0)
+                        XCTAssertEqual(station.msgText, "K1ABC")
+                        station.stopTransmission()
+                    }
+                }
+            }
+        }
+    }
+
     /// Keyer: character spacing inside a single callsign must be the
     /// standard 1U intra-character / 3U inter-character (Delphi comment:
     /// "' ': AddOff(2,0) // 3U inter-char spacing (2U + prior 1U)").
