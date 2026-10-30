@@ -87,7 +87,7 @@ class ALLJA: Contest {
 
     override func getStationInfo(_ callsign: String) -> String {
         guard let rec = findCallRec(callsign), !rec.userText.isEmpty else { return "" }
-        return callsign + " - " + rec.userText
+        return Dxcc.shared.displayPrefix(for: callsign) + " - " + rec.userText
     }
 
     /// Multiplier = location code with the trailing power letter (L/M/H/P)

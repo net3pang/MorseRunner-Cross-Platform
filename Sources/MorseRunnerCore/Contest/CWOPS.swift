@@ -121,7 +121,7 @@ final class CWOPS: Contest {
                 }
             }
             if !userText.isEmpty {
-                return callsign + " - " + userText
+                return Dxcc.shared.displayPrefix(for: callsign) + " - " + userText
             }
         }
         return ""

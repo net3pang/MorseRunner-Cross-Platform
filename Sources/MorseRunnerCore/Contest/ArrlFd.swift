@@ -204,7 +204,7 @@ final class ArrlFieldDay: Contest {
             dxEntity = dxrec.continent + "/" + dxrec.entity
         }
         if !userText.isEmpty || !dxEntity.isEmpty {
-            var result = callsign
+            var result = Dxcc.shared.displayPrefix(for: callsign)
             if !userText.isEmpty { result += " - " + userText }
             if !dxEntity.isEmpty { result += " - " + dxEntity }
             return result

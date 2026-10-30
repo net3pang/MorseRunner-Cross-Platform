@@ -165,7 +165,7 @@ final class NcjNaQp: DualExchangeContest {
             }
         }
         if !userText.isEmpty || !dxEntity.isEmpty {
-            var result = callsign
+            var result = Dxcc.shared.displayPrefix(for: callsign)
             if !userText.isEmpty { result += " - " + userText }
             if !dxEntity.isEmpty { result += " - " + dxEntity }
             return result

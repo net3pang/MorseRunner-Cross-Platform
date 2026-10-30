@@ -153,7 +153,7 @@ final class CqWpx: Contest {
 
     override func getStationInfo(_ callsign: String) -> String {
         if let dxrec = Dxcc.shared.findRec(callsign) {
-            return "\(callsign) - \(dxrec.continent)/\(dxrec.entity)"
+            return "\(Dxcc.shared.displayPrefix(for: callsign)) - \(dxrec.continent)/\(dxrec.entity)"
         }
         return ""
     }
