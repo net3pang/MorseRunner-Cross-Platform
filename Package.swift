@@ -36,6 +36,11 @@ let package = Package(
             name: "MorseRunnerCoreTests",
             dependencies: ["MorseRunnerCore"],
             path: "Sources/EngineTest"
+        ),
+        .testTarget(
+            name: "MorseRunnerMacTests",
+            dependencies: [.target(name: "MorseRunner", condition: .when(platforms: [.macOS]))],
+            path: "Sources/MacTest"
         )
     ]
 )

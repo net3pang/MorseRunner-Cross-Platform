@@ -215,7 +215,7 @@ final class Sweepstakes: Contest {
 
     override func getStationInfo(_ callsign: String) -> String {
         if let rec = findCallRec(callsign), !rec.userText.isEmpty {
-            return callsign + " - " + rec.userText
+            return Dxcc.shared.displayPrefix(for: callsign) + " - " + rec.userText
         }
         return ""
     }

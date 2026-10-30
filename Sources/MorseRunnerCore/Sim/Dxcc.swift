@@ -96,10 +96,16 @@ final class Dxcc {
         return dxccList[index]
     }
 
+    /// Display only the entered callsign's prefix, including its district digit
+    /// (e.g. N1MM -> N1), rather than all prefixes assigned to its DXCC entity.
+    func displayPrefix(for callsign: String) -> String {
+        let prefix = CallsignUtils.extractPrefix(callsign)
+        return prefix.isEmpty ? "Unknown" : prefix
+    }
+
     /// Status-bar info string (Delphi `GetStationInfo`/`Search`).
     func stationInfo(_ callsign: String) -> String {
-        let sP = CallsignUtils.extractPrefix(callsign)
-        guard let index = searchPrefix(sP) else { return "Unknown" }
-        return sP + ":  " + dxccList[index].displayString
+        guard let rec = findRec(callsign) else { return "Unknown" }
+        return displayPrefix(for: callsign) + ":  " + rec.displayString
     }
 }

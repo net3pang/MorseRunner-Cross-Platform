@@ -244,7 +244,7 @@ public enum Settings {
     public nonisolated(unsafe) static var userExchange2 = [String](repeating: "", count: SimContest.allCases.count)
 
     // ---- Station audio
-    public nonisolated(unsafe) static var monLevel = 0          // dB, range [-60, 0]
+    public nonisolated(unsafe) static var monLevel = -15        // dB, range [-60, 0]
     public nonisolated(unsafe) static var saveWav = false
 
     // ---- Settings
@@ -289,7 +289,7 @@ public enum Settings {
         "System.PostMethod": "POST",
         "System.ShowCallsignInfo": true,
         "System.BufSize": 3,
-        "Station.SelfMonVolume": 0,
+        "Station.SelfMonVolume": -15,
         "Station.SaveWav": false,
         "Settings.FarnsworthCharacterRate": 25,
         "Settings.WpmStepRate": 2,
